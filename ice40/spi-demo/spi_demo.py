@@ -50,7 +50,8 @@ class SPIDEMO(Module):
         self.specials.p_mem = self.mem.get_port(write_capable=False)
         self.submodules.osc = OSC(freq="12MHz",sim=sim)
         self.clk = self.osc.clk
-        self.submodules.crg = CRG(clk = self.clk)
+        if not sim:
+            self.submodules.crg = CRG(clk = self.clk)
         self.submodules.blinker = Blinker(platform.request("led"),clk_freq=self.osc.frequency,period=0.5)
         self.submodules.spi = SB_SPI(pads = platform.request("spi"),sim=sim)
 
@@ -189,7 +190,6 @@ if __name__ == "__main__":
 
     if command == "sim":
         spidemo = SPIDEMO(platform=plat,sim=True)
-        print(spidemo.osc.frequency)
         spidemo.run_simulation()
     elif command == "build":
         spidemo = SPIDEMO(platform=plat,sim=False)
