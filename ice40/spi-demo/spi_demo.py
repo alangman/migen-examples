@@ -18,8 +18,8 @@ class Blinker(Module):
 
 
 class SPIDEMO(Module):
-    def __init__(self,platform=None,pads_led = None,sim=False):
-        spi_regs = {"SPICR0"  :0x08,
+    spi_regs = {
+            "SPICR0"  :0x08,
             "SPICR1"  :0x09,
             "SPICR2"  :0x0A,
             "SPIBR"   :0x0B,
@@ -32,6 +32,7 @@ class SPIDEMO(Module):
             "END"     :0x10
         }
 
+    def __init__(self,platform=None,pads_led = None,sim=False):
         spi_init = [("SPICR1",0x80),     #Reset SPI
                     ("SPIBR", 0x3f),     #Set Divider
                     ("SPICR2",0xC0),     #Set Master Mode
@@ -41,33 +42,83 @@ class SPIDEMO(Module):
         spi_test_str = b'Hello World\r'
 
         #Create and initialize spi init sequence memory    addr[4..0]data[7..0]
-        self.specials.mem_spi_init = Memory(width=13,depth=len(spi_init),init=[spi_regs[e[0]] <<8 | e[1] for e in spi_init])
-        #Crete and initialize spi test string memory
-        self.specials.mem_test_data = Memory(width=8,depth=len(spi_test_str),init=[char for char in spi_test_str])
+        mem_depth = len(spi_init) + len(spi_test_str) + 1   #include terminate value
+        mem_width = 12   #4 bit Addr, 8 bit Data
+        mem_i_config   =  [(SPIDEMO.spi_regs[e[0]] <<8 | e[1])       for e in spi_init]
+        mem_i_test_str =  [(SPIDEMO.spi_regs["SPITXDR"] << 8 | char) for char in spi_test_str]
+        self.specials.mem = Memory(width=mem_width,depth=mem_depth,init=mem_i_config + mem_i_test_str)
 
         self.submodules.osc = OSC(freq="12MHz",sim=sim)
         self.submodules.crg = CRG(clk = self.osc.clk)
         self.submodules.blinker = Blinker(platform.request("led"),clk_freq=self.osc.frequency,period=0.5)
         self.submodules.spi0 = SB_SPI(pads = platform.request("spi"),sim=sim)
 
-    def sim_memory_test(self):
-        print("Reading SPI Initialization Memory")
-        for i in range(self.mem_spi_init.depth):
-            value = yield self.mem_spi_init[i]
-            self.display_mem(i,value)
-        yield
-        yield
-        for i in range(self.mem_test_data.depth):
-            value = yield self.mem_test_data[i]
-            self.display_mem(i,value)
-        yield
-        yield
+        index = Signal(8,reset=0)
 
-    def display_mem(self,i,value):
-         print("mem_spi_init[{}] --> \t Addr = {:02x}, Data {:02x}".format(i,(value >> 8) & 0x1f ,value & 0xff))
+        ctrlfsm = FSM()
+        self.submodules += ctrlfsm
+
+        ctrlfsm.act("START",
+            NextState("SEND_INIT")
+        )
+
+        ctrlfsm.act("WRITE_CONFIG_DATA",
+            self.tb_i.eq(1),
+            self.rw_i.eq(1),
+            self.data_i.eq(self.mem[index][:8]),    
+            self.addr_i.eq(self.mem[index][8:]),
+            NextValue(index,index + 1),
+            NextState("WAIT_WRITE_CONFIG_ACK")
+        )
+
+        ctrlfsm.act("WAIT_WRITE_CONFIG_ACK",
+            If(self.spi.ack_o == 0,
+                If (index == len(spi_init),
+                    self.tb.i.eq(0),
+                    NextState("WRITE_TEST_DATA")
+                )
+            )
+        )
+
+        ctrlfsm.act("WRITE_TEST_DATA",
+            self.tb_i.eq(1),
+            self.rw_i.eq(1),
+            self.data_i.eq(self.mem[index][:8]),    
+            self.addr_i.eq(self.mem[index][8:]),
+            NextValue(index,index + 1),
+            NextState("WAIT_WRITE_TEST_DATA_ACK")
+        )
+
+        ctrlfsm.act("WAIT_WRITE_TEST_DATA_ACK",
+            If(self.spi.ack_o == 0,
+                If (index == len(spi_init),
+                    self.tb.i.eq(0),
+                    NextState("READY_WRITE_TEST_DATA") #BEN WAS HERE
+            )
+        
+
+
+
+
+    
+    def tb_spi_demo(self):
+        print("Reading SPI Initialization Memory")
+        for i in range(self.mem.depth):
+            value = yield self.mem[i]
+            addr = (value >> 8) & 0x1f
+            data = value & 0xff
+            print("mem_spi_init[{}] --> \t Addr = {:02x}, Data {:02x}".format(i,addr ,data),end="")
+            if addr == SPIDEMO.spi_regs["SPITXDR"]:
+                if (data != ord('\r')):
+                    print("[{:c}]".format(data),end="")
+                else:
+                    print("[<newline>]",end="")
+            print()   
+        yield
+        yield
 
     def run_simulation(self):
-        run_simulation(self,self.sim_memory_test(),vcd_name="spi_test.vcd")
+        run_simulation(self,self.tb_spi_demo(),vcd_name="spi_test.vcd")
 
 
 
