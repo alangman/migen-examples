@@ -34,9 +34,9 @@ class SPIDEMO(Module):
 
     def __init__(self,platform=None,pads_led = None,sim=False):
         spi_init = [("SPICR1",0x80),     #Reset SPI
-                    ("SPIBR", 0x3f),     #Set Divider
-                    ("SPICR2",0xC0),     #Set Master Mode
-                    ("END",0xAA)
+                    ("SPIBR", 0x23),     #Set Divider to 48  for 1MHz SPI CLK  (div = DIVIDER[5..0]+1)
+                    ("SPICSR",0x01),     #CSN_0 as chip select
+                    ("SPICR2",0xC0)      #Set Master Mode CPOL=0,CPHA=0,LDBF=0
                     ]
         
         spi_test_str = b'Hello World, And Welcome\r'
@@ -49,7 +49,7 @@ class SPIDEMO(Module):
         self.specials.mem = Memory(width=mem_width,depth=mem_depth,init=mem_i_config + mem_i_test_str)
         self.specials.p_mem = self.mem.get_port(write_capable=False)
         #Configure oscillator and clock
-        self.submodules.osc = OSC(freq="12MHz",sim=sim)
+        self.submodules.osc = OSC(freq="24MHz",sim=sim)
         if not sim:
             self.clk = self.osc.clk
             self.submodules.crg = CRG(clk = self.clk)
@@ -106,7 +106,7 @@ class SPIDEMO(Module):
             If(self.spi.ack_o == 1,
                 self.spi.tb_i.eq(0),  
                 If (_index == self.mem.depth,
-                    NextState("DONE") #BEN WAS HERE
+                    NextState("DONE") 
                 ).Else(
                     NextState("READ_STATUS_REGISTER")
                 )
@@ -116,7 +116,7 @@ class SPIDEMO(Module):
         ctrlfsm.act("READ_STATUS_REGISTER",
                 self.spi.tb_i.eq(1),
                 self.spi.rw_i.eq(0),
-                self.spi.addr_i.eq(SPIDEMO.spi_regs["SPITXDR"]),
+                self.spi.addr_i.eq(SPIDEMO.spi_regs["SPISR"]),
                 NextState("WAIT_FOR_READ_STATUS_REGISTER_ACK")
             )
 
@@ -124,7 +124,7 @@ class SPIDEMO(Module):
         ctrlfsm.act("WAIT_FOR_READ_STATUS_REGISTER_ACK",
             If( self.spi.ack_o == 1,
                 self.spi.tb_i.eq(0),
-                NextState("WAIT_FOR_TX_READY") #BEN WAS HERE
+                NextState("WAIT_FOR_TX_READY") 
                 )
         )
 
@@ -133,7 +133,7 @@ class SPIDEMO(Module):
             self.spi.tb_i.eq(0),
             self.p_mem.adr.eq(_index),
             If(self.spi.dat_o[4] == 0,
-                NextState("READ_STATUS_REGISTER") #BEN WAS HERE
+                NextState("READ_STATUS_REGISTER") 
             ).Else(
                 NextState("WRITE_TEST_DATA")  
             )
@@ -167,7 +167,7 @@ class SPIDEMO(Module):
             spi_rw     = yield self.spi.rw_i
             spi_ack_o  = yield self.spi.ack_o
             if (spi_strobe == 1) & (spi_rw == 1):
-                print("State: {:<20}:, Index={:<2}, SPI: Addr {:03x}, Data {:02x} ".format(states[state],index,addr,data),end="")
+                print("State: {:<20}: Index={:<2}, SPI: Addr {:03x}, Data {:02x} ".format(states[state],index,addr,data),end="")
                 if addr == SPIDEMO.spi_regs["SPITXDR"]:
                     if (data != ord('\r')):
                         print("[{:c}]".format(data),end="")
