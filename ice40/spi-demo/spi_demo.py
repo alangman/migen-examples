@@ -39,7 +39,7 @@ class SPIDEMO(Module):
                     ("END",0xAA)
                     ]
         
-        spi_test_str = b'Hello World\r'
+        spi_test_str = b'Hello World, And Welcome\r'
 
         #Create and initialize spi init sequence memory    addr[4..0]data[7..0]
         mem_depth = len(spi_init) + len(spi_test_str) + 1   #include terminate value
@@ -50,20 +50,18 @@ class SPIDEMO(Module):
         self.specials.p_mem = self.mem.get_port(write_capable=False)
         self.submodules.osc = OSC(freq="12MHz",sim=sim)
         self.clk = self.osc.clk
-        if not sim:
-            self.submodules.crg = CRG(clk = self.clk)
+        self.submodules.crg = CRG(clk = self.clk)
         self.submodules.blinker = Blinker(platform.request("led"),clk_freq=self.osc.frequency,period=0.5)
         self.submodules.spi = SB_SPI(pads = platform.request("spi"),sim=sim)
 
-        self.index = Signal(8,reset=0)   #Make sure the width of index is the same as the addr of the mem
-        index = self.index
+        _index = Signal(8,reset=0)   #Make sure the width of index is the same as the addr of the mem
+        self.index = _index
         self.submodules.ctrlfsm  = FSM()
         ctrlfsm = self.ctrlfsm
 
         ctrlfsm.act("START",
             #add delay other setup.
-            index.eq(0),
-            self.p_mem.adr.eq(index),
+            self.p_mem.adr.eq(_index),
             NextState("WRITE_CONFIG_DATA")
         )
 
@@ -72,15 +70,15 @@ class SPIDEMO(Module):
             self.spi.rw_i.eq(1),
             self.spi.dat_i.eq(self.p_mem.dat_r[:8]),    
             self.spi.addr_i.eq(self.p_mem.dat_r[8:]),
-            NextValue(index,index + 1),
+            NextValue(_index,_index + 1),
             NextState("WAIT_WRITE_CONFIG_ACK")
         )
 
         ctrlfsm.act("WAIT_WRITE_CONFIG_ACK",
             If(self.spi.ack_o == 1,
                 self.spi.tb_i.eq(0),
-                self.p_mem.adr.eq(index),
-                If (index == len(spi_init),
+                self.p_mem.adr.eq(_index),
+                If (_index == len(spi_init),
                     NextState("WRITE_TEST_DATA")
                 ). Else(
                     NextState("WRITE_CONFIG_DATA")
@@ -93,14 +91,14 @@ class SPIDEMO(Module):
             self.spi.rw_i.eq(1),
             self.spi.dat_i.eq(self.p_mem.dat_r[:8]),    
             self.spi.addr_i.eq(self.p_mem.dat_r[8:]),
-            NextValue(index,index + 1),
+            NextValue(_index,_index + 1),
             NextState("WAIT_WRITE_TEST_DATA_ACK")
         )
 
         ctrlfsm.act("WAIT_WRITE_TEST_DATA_ACK",
             If(self.spi.ack_o == 1,
                 self.spi.tb_i.eq(0),  
-                If (index == len(spi_test_str),
+                If (_index == self.mem.depth,
                     NextState("DONE") #BEN WAS HERE
                 ).Else(
                     NextState("READ_STATUS_REGISTER")
@@ -126,7 +124,7 @@ class SPIDEMO(Module):
          
         ctrlfsm.act("WAIT_FOR_TX_READY",
             self.spi.tb_i.eq(0),
-            self.p_mem.adr.eq(index),
+            self.p_mem.adr.eq(_index),
             If(self.spi.dat_o[4] == 0,
                 NextState("READ_STATUS_REGISTER") #BEN WAS HERE
             ).Else(
@@ -140,8 +138,7 @@ class SPIDEMO(Module):
 
 
     def tb_spi_demo(self):
-        yield
-        yield
+        states = list(self.ctrlfsm.actions.keys())
         print("Reading SPI Initialization Memory")
         for i in range(self.mem.depth):
             value = yield self.mem[i]
@@ -157,16 +154,23 @@ class SPIDEMO(Module):
         
         yield self.spi.ack_o.eq(1)
         yield self.spi.dat_o.eq(0xff)
-        yield
-        for i in range(20):
+        for i in range(100):
             state = yield self.ctrlfsm.state
             index = yield self.index
-            print("State <{}>, Index={}".format(state,index))
-            yield
-        
-
-    def tb_run(self,cycles):
-        yield
+            addr  = yield self.spi.addr_i
+            data  = yield self.spi.dat_i
+            spi_strobe = yield self.spi.tb_i
+            spi_rw     = yield self.spi.rw_i
+            spi_ack_o  = yield self.spi.ack_o
+            if (spi_strobe == 1) & (spi_rw == 1):
+                print("State: {:<20}:, Index={:<2}, SPI: Addr {:03x}, Data {:02x} ".format(states[state],index,addr,data),end="")
+                if addr == SPIDEMO.spi_regs["SPITXDR"]:
+                    if (data != ord('\r')):
+                        print("[{:c}]".format(data),end="")
+                    else:
+                        print("[<newline>]",end="")  
+                print()
+            yield        
 
     def run_simulation(self):
         run_simulation(self,self.tb_spi_demo(),vcd_name="spi_test.vcd")
@@ -175,13 +179,25 @@ class SPIDEMO(Module):
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Lattice ICE40 SPI Demo Example")
+    parser.add_argument("command", nargs=1,choices=["sim","build","configure"])
+    args = parser.parse_args()
+    command = args.command[0]
     plat = Platform()
-    spidemo = SPIDEMO(platform=plat,sim=True)
-    print(spidemo.osc.frequency)
-    spidemo.run_simulation()
-    #plat.build(SPIDEMO(platform=plat,sim=False))
-    #plat.create_programmer().flash(address=0,bitstream_file="build/top.bin")
-    
+
+
+    if command == "sim":
+        spidemo = SPIDEMO(platform=plat,sim=True)
+        print(spidemo.osc.frequency)
+        spidemo.run_simulation()
+    elif command == "build":
+        spidemo = SPIDEMO(platform=plat,sim=False)
+        plat.build(spidemo)
+    elif command == "configure":
+        plat.create_programmer().flash(address=0,bitstream_file="build/top.bin")
+    else:
+        print("Unknown command")
     
 
 
