@@ -48,18 +48,24 @@ class SPIDEMO(Module):
         mem_i_test_str =  [(SPIDEMO.spi_regs["SPITXDR"] << 8 | char) for char in spi_test_str]
         self.specials.mem = Memory(width=mem_width,depth=mem_depth,init=mem_i_config + mem_i_test_str)
         self.specials.p_mem = self.mem.get_port(write_capable=False)
+        #Configure oscillator and clock
         self.submodules.osc = OSC(freq="12MHz",sim=sim)
-        self.clk = self.osc.clk
         if not sim:
+            self.clk = self.osc.clk
             self.submodules.crg = CRG(clk = self.clk)
+        #Configure simple led blinker
         self.submodules.blinker = Blinker(platform.request("led"),clk_freq=self.osc.frequency,period=0.5)
+        #Configure lattice spi
         self.submodules.spi = SB_SPI(pads = platform.request("spi"),sim=sim)
 
-        _index = Signal(8,reset=0)   #Make sure the width of index is the same as the addr of the mem
-        self.index = _index
-        self.submodules.ctrlfsm  = FSM()
-        ctrlfsm = self.ctrlfsm
+        #Index to controller memory
+        self.index = _index = Signal(8,reset=0)   #Make sure the width of index is the same as the addr of the mem
 
+
+        #Define simple state machines to write init and test string to SB_SPI
+        self.submodules.ctrlfsm  = ctrlfsm = FSM()
+        
+        
         ctrlfsm.act("START",
             #add delay other setup.
             self.p_mem.adr.eq(_index),
@@ -139,23 +145,20 @@ class SPIDEMO(Module):
 
 
     def tb_spi_demo(self):
-        states = list(self.ctrlfsm.actions.keys())
-        print("Reading SPI Initialization Memory")
-        for i in range(self.mem.depth):
-            value = yield self.mem[i]
-            addr = (value >> 8) & 0x1f
-            data = value & 0xff
-            print("mem_spi_init[{}] --> \t Addr = {:02x}, Data {:02x}".format(i,addr ,data),end="")
-            if addr == SPIDEMO.spi_regs["SPITXDR"]:
-                if (data != ord('\r')):
-                    print("[{:c}]".format(data),end="")
-                else:
-                    print("[<newline>]",end="")
-            print()
-        
+        print("[TEST 1] Read init memory")
+        yield from self.tb_command_memory()
+        print("-------------------------")
+        print("[TEST 2] Test SPI Configuration and DATA transmit")
+        yield from self.tb_spi_controller()
+        print("-------------------------")
+
+         
+    def tb_spi_controller(self):
+        states = list(self.ctrlfsm.actions.keys())      #names of states
         yield self.spi.ack_o.eq(1)
         yield self.spi.dat_o.eq(0xff)
-        for i in range(100):
+        _run=True
+        while _run:
             state = yield self.ctrlfsm.state
             index = yield self.index
             addr  = yield self.spi.addr_i
@@ -171,7 +174,23 @@ class SPIDEMO(Module):
                     else:
                         print("[<newline>]",end="")  
                 print()
+            if states[state] == "DONE":
+                _run = False
             yield        
+
+    def tb_command_memory(self):
+        for i in range(self.mem.depth):
+            value = yield self.mem[i]
+            addr = (value >> 8) & 0x1f
+            data = value & 0xff
+            print("mem_spi_init[{}] --> \t Addr = {:02x}, Data {:02x}".format(i,addr ,data),end="")
+            if addr == SPIDEMO.spi_regs["SPITXDR"]:
+                if (data != ord('\r')):
+                    print("[{:c}]".format(data),end="")
+                else:
+                    print("[<newline>]",end="")
+            print()
+
 
     def run_simulation(self):
         run_simulation(self,self.tb_spi_demo(),vcd_name="spi_test.vcd")
@@ -182,7 +201,7 @@ class SPIDEMO(Module):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Lattice ICE40 SPI Demo Example")
-    parser.add_argument("command", nargs=1,choices=["sim","build","configure"])
+    parser.add_argument("command", nargs=1,choices=["sim","build","configure","verilog"])
     args = parser.parse_args()
     command = args.command[0]
     plat = Platform()
@@ -196,6 +215,9 @@ if __name__ == "__main__":
         plat.build(spidemo)
     elif command == "configure":
         plat.create_programmer().flash(address=0,bitstream_file="build/top.bin")
+    elif command == "verilog":
+        spidemo = SPIDEMO(platform=plat,sim=False)
+        print(verilog.convert(spidemo))
     else:
         print("Unknown command")
     
