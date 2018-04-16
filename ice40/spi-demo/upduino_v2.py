@@ -12,16 +12,16 @@ _io = [
     ),
 
     ("serial", 0,
-        Subsignal("tx", Pins("38")),
-        Subsignal("rx", Pins("28")),
-        IOStandard("LVCMOS33")
+        Subsignal("tx", Pins("38")),      #JP5-15
+        Subsignal("rx", Pins("28")),      #JP5-16
+        IOStandard("LVCMOS33")          
     ),
 
     ("spi", 0,
-     Subsignal("sck",  Pins("34")),
-     Subsignal("ssn",  Pins("43")),
-     Subsignal("mosi", Pins("36")),
-     Subsignal("miso", Pins("42")),
+        Subsignal("ssn",  Pins("34")),     #JP5-11
+        Subsignal("sck",  Pins("43")),     #JP5-12
+        Subsignal("mosi", Pins("36")),     #JP5-13      
+        Subsignal("miso", Pins("42")),     #JP5-14
     ),
 
     ("spiflash", 0,
@@ -30,6 +30,13 @@ _io = [
         Subsignal("mosi", Pins("14"), IOStandard("LVCMOS33")),
         Subsignal("miso", Pins("17"), IOStandard("LVCMOS33"))
     ),
+
+    ("test", 0, 
+        Subsignal("p0", Pins("31")), 
+        Subsignal("p1", Pins("32")),
+        Subsignal("p2", Pins("27")),
+        Subsignal("p3", Pins("26")),
+        IOStandard("LVCMOS33"))
 
 ]
 

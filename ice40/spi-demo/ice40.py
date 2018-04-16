@@ -44,7 +44,7 @@ class SB_SPI(Module):
                  "lrc":{"BUS_ADDR74":0b0001},
                 "available":["lrc","llc"]
                 }
-    def __init__(self,pads = None,clk = None, loc=None,sim=False):
+    def __init__(self,pads = None, loc=None,sim=False):
         #Check to see if resource can be allocatedtb_i.eq(1),
         if not SB_SPI.locations["available"]:
             raise ICE40ResourceError("SB_SPI: all resources allocated")
@@ -56,15 +56,12 @@ class SB_SPI(Module):
         #Allocate the resource
         self._loc = SB_SPI.locations["available"].pop()
         #define the parameters
-        self._bus_addr74 = SB_SPI.locations[self._loc]["BUS_ADDR74"]                       #fixed address
+       
         #Check external interface
         if pads is None:
              ICE40ResourceError("SB_SPI: No pads defined.")
         self.pads = pads
-        if clk is None:
-            self.clk_i = ClockSignal()           # System Clock input
-            print("Warning: SPI core requires clk signal")
-        self.clk_i = clk
+        print("Pads = {}".format(self.pads))
 
         #SOC Interface
         self.wkup_o    = Signal()       # SPI Wakeup from Standby signal
@@ -93,7 +90,7 @@ class SB_SPI(Module):
 
 
         #Internal Signals   (upper bits of SPI is dependant on the core)
-        self.core_addr_i = Signal(4,reset=self._bus_addr74)
+        self._bus_addr74 = Signal(4,reset=SB_SPI.locations[self._loc]["BUS_ADDR74"])                       #fixed address
 
         if not sim:
         #Connect SPI output 
@@ -109,18 +106,18 @@ class SB_SPI(Module):
         
         #Instantiate Lattice IP
             self.specials += Instance ("SB_SPI",
-                                    p_BUS_ADDR74  = "0b{:04b}".format(self._bus_addr74),             # '0b0001'
-                                    i_SBCLKI      = self.clk_i,
+                                    p_BUS_ADDR74  = "0b{:04b}".format(SB_SPI.locations[self._loc]["BUS_ADDR74"]),             # '0b0001'
+                                    i_SBCLKI      = ClockSignal(),
                                     i_SBRWI       = self.rw_i,
                                     i_SBSTBI      = self.tb_i,
                                     i_SBADRI0     = self.addr_i[0],
                                     i_SBADRI1     = self.addr_i[1],
                                     i_SBADRI2     = self.addr_i[2],
                                     i_SBADRI3     = self.addr_i[3],
-                                    i_SBADRI4     = self.core_addr_i[0],
-                                    i_SBADRI5     = self.core_addr_i[1],
-                                    i_SBADRI6     = self.core_addr_i[2],
-                                    i_SBADRI7     = self.core_addr_i[3],
+                                    i_SBADRI4     = self._bus_addr74[0],
+                                    i_SBADRI5     = self._bus_addr74[1],
+                                    i_SBADRI6     = self._bus_addr74[2],
+                                    i_SBADRI7     = self._bus_addr74[3],
                                     i_SBDATI0     = self.dat_i[0],
                                     i_SBDATI1     = self.dat_i[1],
                                     i_SBDATI2     = self.dat_i[2],
