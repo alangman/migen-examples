@@ -17,29 +17,20 @@ class Blinker(Module):
             self.comb +=  self.pad.eq(self.counter[-1])
 
 class SPIDEMO(Module):
-    spi_regs = {
-            "SPICR0"  :0x08,
-            "SPICR1"  :0x09,
-            "SPICR2"  :0x0A,
-            "SPIBR"   :0x0B,
-            "SPITXDR" :0x0D,
-            "SPIRXDR" :0x0E,
-            "SPICSR"  :0x0F,
-            "SPISR"   :0x0C,
-            "SPIINTSR":0x06,
-            "SPIINTCR":0x07,
-            "END"     :0x10
-        }
+    
+    SPICR0  =0x08
+    SPICR1  =0x09
+    SPICR2  =0x0A
+    SPIBR   =0x0B
+    SPITXDR =0x0D
+    SPIRXDR =0x0E
+    SPICSR  =0x0F
+    SPISR   =0x0C
+    SPIINTSR=0x06
+    SPIINTCR=0x07
+
 
     def __init__(self,platform=None,pads_led = None,sim=False):
-        spi_init = [("SPICR1",0x80),     #Reset SPI
-                    ("SPIBR", 0x23),     #Set Divider to 23  for 1MHz SPI CLK  (div = DIVIDER[5..0]+1)
-                    ("SPICSR",0x01),     #CSN_0 as chip select
-                    ("SPICR2",0xC0)      #Set Master Mode CPOL=0,CPHA=0,LDBF=0
-                    ]
-        
-        spi_test_str = b'Hello World, And Welcome\r'
-    
         #Configure oscillator and clock
         self.submodules.osc = OSC(freq="12MHz",sim=sim)
         if not sim:
@@ -52,137 +43,146 @@ class SPIDEMO(Module):
         #Enable SPI core
         self.comb += self.spi.scsn_i.eq(1)
      
-        
-        #Add WaitTimer module
-        self.submodules.delay = WaitTimer(100)     #100 clock cycle delay
 
         #Define simple state machines to write init and test string to SB_SPI
         self.submodules.ctrlfsm  = ctrlfsm = FSM()
 
         self.data_counter = Signal(8,reset=0)
-        self.delay_counter = Signal(8,reset=10)
+        self.delay_counter = Signal(32,reset=10)
 
-        #Testing
-        self.test = platform.request("test") 
-        self.comb += [ self.test.p1.eq(ClockSignal())
-        ]
         
+        if sim:
+            delay_max_bit = 1
+        else:
+            delay_max_bit = 10
 
-        ctrlfsm.act("BEGIN",
-                self.spi.rw_i.eq(0),
-                self.spi.tb_i.eq(0),
-                If(self.delay_counter==0,
-                    NextState("STATE0")
-                    ),
-                NextValue(self.test.p2,0),
-                NextValue(self.delay_counter,self.delay_counter-1)
+        ctrlfsm.act("INIT0",
+                    NextValue(self.delay_counter,10),
+                    NextValue(self.spi.rw_i,0),
+                    NextValue(self.spi.tb_i,0),
+                    NextState("INIT1")
         )
+
+        ctrlfsm.act("INIT1",
+                    If(self.delay_counter == 0,
+                        NextState("STATE0")
+                    ).Else(
+                        NextValue(self.delay_counter,self.delay_counter-1)
+                    )
+        )
+        
         ctrlfsm.act("STATE0",
-                self.spi.addr_i.eq(SPIDEMO.spi_regs["SPICR1"]),
-                self.spi.dat_i.eq(spi_init[0][1]),
-                self.spi.rw_i.eq(1),
-                self.spi.tb_i.eq(1),
+                NextValue(self.spi.addr_i,SPIDEMO.SPICR1),
+                NextValue(self.spi.dat_i,0x80),
+                NextValue(self.spi.rw_i,1),
+                NextValue(self.spi.tb_i,1),
                 NextState("STATE1")
         )
 
+
         ctrlfsm.act("STATE1",
-                If(self.spi.ack_o == 1,
-                    self.spi.rw_i.eq(0),
-                    self.spi.tb_i.eq(0),
+                If(self.spi.ack_o == 0,
+                    NextState("STATE1")
+                ).Else(
+                    NextValue(self.spi.rw_i,0),
+                    NextValue(self.spi.tb_i,0),
                     NextState("STATE2")
-                ),
-                 NextValue(self.test.p2,~self.test.p2),
+                )
         )
 
         ctrlfsm.act("STATE2",       #Set divider
-                self.spi.addr_i.eq(SPIDEMO.spi_regs["SPIBR"]),
-                self.spi.dat_i.eq(spi_init[1][1]),
-                self.spi.rw_i.eq(1),
-                self.spi.tb_i.eq(1),
+                NextValue(self.spi.addr_i,SPIDEMO.SPIBR),
+                NextValue(self.spi.dat_i,0x3f),
+                NextValue(self.spi.rw_i,1),
+                NextValue(self.spi.tb_i,1),
                 NextState("STATE3")
         )
 
         ctrlfsm.act("STATE3",      
-                If(self.spi.ack_o == 1,
-                    self.spi.rw_i.eq(0),
-                    self.spi.tb_i.eq(0),
+                If(self.spi.ack_o == 0,
+                    NextState("STATE3")
+                ).Else(
+                    NextValue(self.spi.rw_i,0),
+                    NextValue(self.spi.tb_i,0),
                     NextState("STATE4")
                 )
         )
 
         ctrlfsm.act("STATE4",       #Set master mode
-                self.spi.addr_i.eq(SPIDEMO.spi_regs["SPICR2"]),
-                self.spi.dat_i.eq(spi_init[2][1]),
-                self.spi.rw_i.eq(1),
-                self.spi.tb_i.eq(1),
+                NextValue(self.spi.addr_i,SPIDEMO.SPICR2),
+                NextValue(self.spi.dat_i,0xc0),
+                NextValue(self.spi.rw_i,1),
+                NextValue(self.spi.tb_i,1),
                 NextState("STATE5")
         )
 
         ctrlfsm.act("STATE5",      
-                If(self.spi.ack_o == 1,
-                    self.spi.rw_i.eq(0),
-                    self.spi.tb_i.eq(0),
+                If(self.spi.ack_o == 0,
+                    NextState("STATE5")
+                ).Else(
+                    NextValue(self.spi.rw_i,0),
+                    NextValue(self.spi.tb_i,0),
                     NextState("STATE6")
                 )
         )
 
 
         ctrlfsm.act("STATE6",       #SEND BYTES
-                self.spi.addr_i.eq(SPIDEMO.spi_regs["SPITXDR"]),
-                self.spi.dat_i.eq(self.data_counter),
-                self.spi.rw_i.eq(1),
-                self.spi.tb_i.eq(1),
+                NextValue(self.spi.dat_i,self.data_counter),
+                NextValue(self.data_counter,self.data_counter+1),
+                NextValue(self.spi.addr_i,SPIDEMO.SPITXDR),
+                NextValue(self.spi.rw_i,1),
+                NextValue(self.spi.tb_i,1),
                 NextState("STATE7")
         )
 
-        ctrlfsm.act("STATE7",     
-                If(self.spi.ack_o == 1,
-                    self.spi.rw_i.eq(0),
-                    self.spi.tb_i.eq(0),
-                    NextValue(self.data_counter,self.data_counter + 1),
+        ctrlfsm.act("STATE7",    
+                If(self.spi.ack_o == 0,
+                    NextState("STATE7")
+                ).Else(
+                    NextValue(self.spi.rw_i,0),
+                    NextValue(self.spi.tb_i,0),
                     NextState("STATE8")
                 )
         )
 
         ctrlfsm.act("STATE8",       #READ Status
-                self.spi.addr_i.eq(SPIDEMO.spi_regs["SPISR"]),
-                self.spi.rw_i.eq(0),
-                self.spi.tb_i.eq(1),
+                NextValue(self.spi.rw_i,0),
+                NextValue(self.spi.tb_i,1),
+                NextValue(self.spi.addr_i,SPIDEMO.SPISR),
                 NextState("STATE9")
         )
 
         ctrlfsm.act("STATE9",      
-                If(self.spi.ack_o == 1,
-                    self.spi.rw_i.eq(0),
-                    self.spi.tb_i.eq(0),
+                If(self.spi.ack_o == 0,
+                    NextState("STATE9")
+                ).Else(
+                    NextValue(self.spi.rw_i,0),
+                    NextValue(self.spi.tb_i,0),
                     NextState("STATE10")
                 )
         )
 
         ctrlfsm.act("STATE10",      
-                NextValue(self.delay_counter,10),
-                If(self.spi.dat_o[4] == 1,
-                    If (self.data_counter == 10,
-                        NextState("STATE11"),
-                    ).Else(
-                        NextState("STATE6")
-                    )
-                ).Else(
+                NextValue(self.delay_counter,0),
+                If(self.spi.dat_o[4] == 0,
                     NextState("STATE8")
+                ).Else (
+                    NextState("STATE11")
                 )
         )
 
         ctrlfsm.act("STATE11",
-                If(self.delay_counter == 0,
-                    NextState("NOP")
-                ),
-                NextValue(self.delay_counter,self.delay_counter-1)
+                If(self.delay_counter[delay_max_bit]==1,
+                NextState("STATE6")
+                ).Else(
+                    NextValue(self.delay_counter,self.delay_counter+1),
+                    NextState("STATE11")
+                )
         )
 
-        ctrlfsm.act("NOP",
-                NextValue(self.data_counter,0),
-                NextState("STATE6")
-        )
+
+
   
 
     def tb_spi_demo(self):
@@ -209,10 +209,10 @@ class SPIDEMO(Module):
             spi_rw      = yield self.spi.rw_i
             spi_ack_o   = yield self.spi.ack_o
             bus_address = yield self.spi._bus_addr74
-            if (states[state]=="STATE6"):
+            if (states[state]=="STATE7"):
                 print("State: {:<20}: Data Counter={:<4}, SPI: Addr {:02x}, Data {:02x}, Cycles {:<5} Bus Address {:02x}".format(states[state],data_counter,addr,data,_cycles,bus_address))      
-            if states[state] == "NOP":
-                _run=False
+            if states[state] == "STATE11" and data_counter == 10:
+                    _run=False
             _cycles += 1 
             yield
 
