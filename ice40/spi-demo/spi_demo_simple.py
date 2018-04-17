@@ -50,6 +50,22 @@ class SPIDEMO(Module):
         self.data_counter = Signal(8,reset=0)
         self.delay_counter = Signal(32,reset=10)
 
+        #Testing signals
+        self.test = platform.request("test") 
+        self.comb += [self.test.p0.eq(ClockSignal())
+        ]
+
+        self.sync += [  self.test.p1.eq(self.spi.ack_o)
+        ]
+
+        spi_busy=Signal()
+        spi_tx_ready=Signal()
+        self.spi_tx_ready=spi_tx_ready
+
+        self.comb+= [
+            spi_busy.eq(self.spi.dat_o[7]),
+            spi_tx_ready.eq(self.spi.dat_o[4])
+        ]
         
         if sim:
             delay_max_bit = 1
@@ -60,6 +76,7 @@ class SPIDEMO(Module):
                     NextValue(self.delay_counter,10),
                     NextValue(self.spi.rw_i,0),
                     NextValue(self.spi.tb_i,0),
+                    self.test.p2.eq(0),
                     NextState("INIT1")
         )
 
@@ -165,16 +182,21 @@ class SPIDEMO(Module):
 
         ctrlfsm.act("STATE10",      
                 NextValue(self.delay_counter,0),
-                If(self.spi.dat_o[4] == 0,
-                    NextState("STATE8")
+                If(self.spi.dat_o[7],
+                    NextState("STATE10"),
+                    self.test.p2.eq(1)
                 ).Else (
+                    If(self.spi.dat_o[4] == 0,
+                        NextState("STATE8")
+                    ).Else (
                     NextState("STATE11")
+                    )
                 )
         )
 
         ctrlfsm.act("STATE11",
                 If(self.delay_counter[delay_max_bit]==1,
-                NextState("STATE6")
+                    NextState("STATE6")
                 ).Else(
                     NextValue(self.delay_counter,self.delay_counter+1),
                     NextState("STATE11")
@@ -199,6 +221,7 @@ class SPIDEMO(Module):
         print(bus_address)
         _run=True
         _cycles = 0
+        spi_tx_ready = yield self.spi_tx_ready
         while _run:
             state = yield self.ctrlfsm.state
             data_counter = yield self.data_counter
@@ -209,12 +232,14 @@ class SPIDEMO(Module):
             spi_rw      = yield self.spi.rw_i
             spi_ack_o   = yield self.spi.ack_o
             bus_address = yield self.spi._bus_addr74
-            if (states[state]=="STATE7"):
-                print("State: {:<20}: Data Counter={:<4}, SPI: Addr {:02x}, Data {:02x}, Cycles {:<5} Bus Address {:02x}".format(states[state],data_counter,addr,data,_cycles,bus_address))      
+            if (states[state]=="STATE7")|True:
+                print("State: {:<20}: Data Counter={:<4}, SPI: Addr {:02x}, Data {:02x}, Cycles {:<5} Bus Address {:02x} TX Ready: {}".format(states[state],data_counter,addr,data,_cycles,bus_address,spi_tx_ready))      
             if states[state] == "STATE11" and data_counter == 10:
                     _run=False
             _cycles += 1 
             yield
+            if _cycles > 50:
+                _run = False
 
 
     def run_simulation(self):
