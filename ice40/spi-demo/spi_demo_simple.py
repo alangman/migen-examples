@@ -39,7 +39,8 @@ class SPIDEMO(Module):
         #Configure simple led blinker
         self.submodules.blinker = Blinker(platform.request("led"),clk_freq=self.osc.frequency,period=0.5)
         #Configure lattice spi
-        self.submodules.spi = SB_SPI(pads = platform.request("spi"), sim=sim)
+        pads_spi = platform.request("spi")
+        self.submodules.spi = SB_SPI(pads = pads_spi, sim=sim)
         #Enable SPI core
         self.comb += self.spi.scsn_i.eq(1)
      
@@ -55,7 +56,8 @@ class SPIDEMO(Module):
         self.comb += [self.test.p0.eq(ClockSignal())
         ]
 
-        self.sync += [  self.test.p1.eq(self.spi.ack_o)
+        self.sync += [  self.test.p1.eq(self.spi.ack_o),
+    
         ]
 
         spi_busy=Signal()
@@ -76,7 +78,8 @@ class SPIDEMO(Module):
                     NextValue(self.delay_counter,10),
                     NextValue(self.spi.rw_i,0),
                     NextValue(self.spi.tb_i,0),
-                    self.test.p2.eq(0),
+                    NextValue(self.test.p2,0),
+                    NextValue(pads_spi.ssn,1),
                     NextState("INIT1")
         )
 
@@ -127,7 +130,7 @@ class SPIDEMO(Module):
 
         ctrlfsm.act("STATE4",       #Set master mode
                 NextValue(self.spi.addr_i,SPIDEMO.SPICR2),
-                NextValue(self.spi.dat_i,0xc0),
+                NextValue(self.spi.dat_i,0xc4),
                 NextValue(self.spi.rw_i,1),
                 NextValue(self.spi.tb_i,1),
                 NextState("STATE5")
@@ -145,6 +148,7 @@ class SPIDEMO(Module):
 
 
         ctrlfsm.act("STATE6",       #SEND BYTES
+                NextValue(pads_spi.ssn,1),
                 NextValue(self.spi.dat_i,self.data_counter),
                 NextValue(self.data_counter,self.data_counter+1),
                 NextValue(self.spi.addr_i,SPIDEMO.SPITXDR),
@@ -173,6 +177,7 @@ class SPIDEMO(Module):
         ctrlfsm.act("STATE9",      
                 If(self.spi.ack_o == 0,
                     NextState("STATE9")
+
                 ).Else(
                     NextValue(self.spi.rw_i,0),
                     NextValue(self.spi.tb_i,0),
@@ -182,19 +187,17 @@ class SPIDEMO(Module):
 
         ctrlfsm.act("STATE10",      
                 NextValue(self.delay_counter,0),
-                If(self.spi.dat_o[7],
-                    NextState("STATE10"),
-                    self.test.p2.eq(1)
-                ).Else (
-                    If(self.spi.dat_o[4] == 0,
-                        NextState("STATE8")
+                If(self.spi.dat_o[4] == 0,
+                        NextState("STATE8"),    #Could also just wait around here.
+                        NextValue(self.test.p2,1)
                     ).Else (
-                    NextState("STATE11")
+                        NextValue(pads_spi.ssn,0),
+                        NextState("STATE11")
                     )
-                )
         )
 
         ctrlfsm.act("STATE11",
+                NextValue(self.test.p2,0),
                 If(self.delay_counter[delay_max_bit]==1,
                     NextState("STATE6")
                 ).Else(
@@ -232,14 +235,12 @@ class SPIDEMO(Module):
             spi_rw      = yield self.spi.rw_i
             spi_ack_o   = yield self.spi.ack_o
             bus_address = yield self.spi._bus_addr74
-            if (states[state]=="STATE7")|True:
+            if (states[state]=="STATE7"):
                 print("State: {:<20}: Data Counter={:<4}, SPI: Addr {:02x}, Data {:02x}, Cycles {:<5} Bus Address {:02x} TX Ready: {}".format(states[state],data_counter,addr,data,_cycles,bus_address,spi_tx_ready))      
             if states[state] == "STATE11" and data_counter == 10:
                     _run=False
             _cycles += 1 
             yield
-            if _cycles > 50:
-                _run = False
 
 
     def run_simulation(self):

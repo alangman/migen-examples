@@ -54,7 +54,8 @@ class SPIDEMO(Module):
         #Configure simple led blinker
         self.submodules.blinker = Blinker(platform.request("led"),clk_freq=self.osc.frequency,period=0.5)
         #Configure lattice spi
-        self.submodules.spi = SB_SPI(pads = platform.request("spi"), sim=sim)
+        pads_spi = platform.request("spi")
+        self.submodules.spi = SB_SPI(pads = pads_spi), sim=sim)
         #Enable SPI core
         self.comb += self.spi.scsn_i.eq(1)
 

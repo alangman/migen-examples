@@ -91,7 +91,7 @@ class SB_SPI(Module):
 
         #Internal Signals   (upper bits of SPI is dependant on the core)
         self._bus_addr74 = Signal(4,reset=SB_SPI.locations[self._loc]["BUS_ADDR74"])                       #fixed address
-
+        
         if not sim:
         #Connect SPI output 
             self.specials += Instance("SB_IO", p_PIN_TYPE=0b101001,
@@ -100,10 +100,11 @@ class SB_SPI(Module):
                         io_PACKAGE_PIN = self.pads.miso, o_OUTPUT_ENABLE=self.soe_o, o_D_OUT_0=self.so_o, o_D_IN_0=self.mi_i)
             self.specials += Instance("SB_IO", p_PIN_TYPE=0b101001,p_PULLUP=0b1,
                         io_PACKAGE_PIN = self.pads.sck, o_OUTPUT_ENABLE=self.sckoe_o, o_D_OUT_0=self.sck_o, o_D_IN_0=self.sck_i)
-            for i in range(len(pads.ssn)):   #support more than on CS
-                self.specials += Instance("SB_IO", p_PIN_TYPE=0b101001,
-                        io_PACKAGE_PIN = self.pads.ssn[i], o_OUTPUT_ENABLE=self.mcsno_o[i], o_D_OUT_0=self.mcsnoe_o[i])
-        
+            #n_ssn = len(pads.ssn)
+            #for i in range(n_ssn):   #support more than on CS
+            #    self.specials += Instance("SB_IO", p_PIN_TYPE=0b101001,
+            #            io_PACKAGE_PIN = self.pads.ssn[(i+1) % n_ssn], o_OUTPUT_ENABLE=self.mcsno_o[i], o_D_IN_0=self.mcsnoe_o[i])
+
         #Instantiate Lattice IP
             self.specials += Instance ("SB_SPI",
                                     p_BUS_ADDR74  = "0b{:04b}".format(SB_SPI.locations[self._loc]["BUS_ADDR74"]),             # '0b0001'
