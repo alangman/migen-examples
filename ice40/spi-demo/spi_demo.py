@@ -33,8 +33,8 @@ class SPIDEMO(Module):
 
     def __init__(self,platform=None,pads_led = None,sim=False):
         spi_init = [("SPICR1",0x80),     #Reset SPI
-                    ("SPIBR", 0x3f),     #Set Divider to 23  for 1MHz SPI CLK  (div = DIVIDER[5..0]+1)
-                    ("SPICR2",0xC4)      #Set Master Mode CPOL=0,CPHA=0,LDBF=0
+                    ("SPIBR", 0x2f),     #Set Divider to 47  for 1MHz SPI CLK  (div = DIVIDER[5..0]+1)
+                    ("SPICR2",0xC0)      #Set Master Mode CPOL=0,CPHA=0,LDBF=0
                     ]
         
         spi_test_str = [0,1,2,3,4,5,6,7,8,9,10,11]
@@ -50,7 +50,7 @@ class SPIDEMO(Module):
         print("Length of test vector = {:<2}, Depth of Memory = {:<2}".format(len(spi_test_str),self.mem.depth))
 
         #Configure oscillator and clock
-        self.submodules.osc = OSC(freq="6MHz",sim=sim)
+        self.submodules.osc = OSC(freq="48MHz",sim=sim)
         if not sim:
             self.submodules.crg = CRG(clk = self.osc.clk)
           
