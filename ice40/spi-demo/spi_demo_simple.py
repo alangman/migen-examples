@@ -75,7 +75,7 @@ class SPIDEMO(Module):
             delay_max_bit = 10
 
         ctrlfsm.act("INIT0",
-                    NextValue(self.delay_counter,10),
+                    NextValue(self.delay_counter,1024),
                     NextValue(self.spi.rw_i,0),
                     NextValue(self.spi.tb_i,0),
                     NextValue(self.test.p2,0),

@@ -34,20 +34,23 @@ class SPIDEMO(Module):
     def __init__(self,platform=None,pads_led = None,sim=False):
         spi_init = [("SPICR1",0x80),     #Reset SPI
                     ("SPIBR", 0x3f),     #Set Divider to 23  for 1MHz SPI CLK  (div = DIVIDER[5..0]+1)
-                    ("SPICR2",0xC0)      #Set Master Mode CPOL=0,CPHA=0,LDBF=0
+                    ("SPICR2",0xC4)      #Set Master Mode CPOL=0,CPHA=0,LDBF=0
                     ]
         
-        spi_test_str = b'Hello World, And Welcome\r'
+        spi_test_str = [0,1,2,3,4,5,6,7,8,9,10,11]
 
         #Create and initialize spi init sequence memory    addr[4..0]data[7..0]
-        mem_depth = len(spi_init) + len(spi_test_str) + 1   #include terminate value
+        mem_depth = len(spi_init) + len(spi_test_str)   #include terminate value
         mem_width = 12   #4 bit Addr, 8 bit Data
         mem_i_config   =  [(SPIDEMO.spi_regs[e[0]] <<8 | e[1])       for e in spi_init]
         mem_i_test_str =  [(SPIDEMO.spi_regs["SPITXDR"] << 8 | char) for char in spi_test_str]
-        self.specials.mem = Memory(width=mem_width,depth=mem_depth,init=mem_i_config + mem_i_test_str)
-        self.specials.p_mem = self.mem.get_port()
+        self.specials.mem = Memory(name="mem",width=mem_width,depth=mem_depth,init=mem_i_config + mem_i_test_str)
+        self.specials.p_mem = self.mem.get_port(async_read=True)
+
+        print("Length of test vector = {:<2}, Depth of Memory = {:<2}".format(len(spi_test_str),self.mem.depth))
+
         #Configure oscillator and clock
-        self.submodules.osc = OSC(freq="12MHz",sim=sim)
+        self.submodules.osc = OSC(freq="6MHz",sim=sim)
         if not sim:
             self.submodules.crg = CRG(clk = self.osc.clk)
           
@@ -55,13 +58,14 @@ class SPIDEMO(Module):
         self.submodules.blinker = Blinker(platform.request("led"),clk_freq=self.osc.frequency,period=0.5)
         #Configure lattice spi
         pads_spi = platform.request("spi")
-        self.submodules.spi = SB_SPI(pads = pads_spi), sim=sim)
+        self.submodules.spi = SB_SPI(pads = pads_spi, sim=sim)
         #Enable SPI core
         self.comb += self.spi.scsn_i.eq(1)
 
         #Index to controller memory
         self.index = _index = Signal(8,reset=0)   #Make sure the width of index is the same as the addr of the mem
-        
+
+        self.comb += self.p_mem.adr.eq(_index)
 
         #Define simple state machines to write init and test string to SB_SPI
         self.submodules.ctrlfsm  = ctrlfsm = FSM()
@@ -74,38 +78,34 @@ class SPIDEMO(Module):
 
         #Counter for data 
         self.mem_index = index = Signal(max=self.mem.depth,reset=0)
-        self.delay_counter = Signal(self.delay_msb+1,reset=10)
+        self.delay_counter = Signal(self.delay_msb+1+2,reset=10)
 
         #Testing signals
         self.test = platform.request("test") 
-        self.comb += [  self.test.p0.eq(ClockSignal()),
-                        self.test.p2.eq(self.spi.ack_o)
+        self.comb += [ self.test.p1.eq(self.spi.ack_o)
         ]
     
 
         ctrlfsm.act("INIT0",
-                    NextValue(self.delay_counter,10),
+                    NextValue(self.delay_counter,1024),
                     NextValue(self.spi.rw_i,0),
                     NextValue(self.spi.tb_i,0),
-                    NextValue(self.test.p1,0),                  
+                    NextValue(self.test.p0,0),  
+                    NextValue(self.test.p2,0),     
+                    NextValue(pads_spi.ssn,1),             
                     NextValue(_index,0),
                     NextState("INIT1")
         )
 
         ctrlfsm.act("INIT1",
                     If(self.delay_counter == 1,
-                        NextState("WRITE_CONFIG_DATA")
+                        NextState("WRITE_CONFIG_DATA"),
                     ).Else(
                         NextValue(self.delay_counter,self.delay_counter-1)
                     )
         )
 
-
         ctrlfsm.act("WRITE_CONFIG_DATA",
-                self.p_mem.adr.eq(_index),             #Sync memory so already registered
-                NextState("WRITE_CONFIG_DATA_0"),
-        )
-        ctrlfsm.act("WRITE_CONFIG_DATA_0",
             If (_index == len(spi_init),
                 NextState("WRITE_TEST_DATA")
             ).Else(          
@@ -128,18 +128,13 @@ class SPIDEMO(Module):
             )
         )
 
-        ctrlfsm.act("WRITE_TEST_DATA",
-                self.p_mem.adr.eq(_index),
-                NextValue(self.test.p1,1),
-                NextState("WRITE_TEST_DATA_0")
-        )
 
-        ctrlfsm.act("WRITE_TEST_DATA_0",
+        ctrlfsm.act("WRITE_TEST_DATA",
             If (_index == self.mem.depth,
-                NextValue(self.delay_counter,0),
-                NextState("DELAY") 
+                NextState("DELAY_FRAME"),
+                NextValue(self.test.p0,0),
+                NextValue(self.delay_counter,0)
             ).Else(
-                self.p_mem.adr.eq(_index),
                 NextValue(self.spi.dat_i,self.p_mem.dat_r[:8]),    
                 NextValue(self.spi.addr_i,self.p_mem.dat_r[8:]),
                 NextValue(self.spi.rw_i,1),
@@ -154,7 +149,8 @@ class SPIDEMO(Module):
             ).Else(
                 NextValue(self.spi.rw_i,0),
                 NextValue(self.spi.tb_i,0),
-                NextState("READ_STATUS_REGISTER")
+                NextState("READ_STATUS_REGISTER"),
+                NextValue(pads_spi.ssn,0),
             )
         )
 
@@ -178,22 +174,38 @@ class SPIDEMO(Module):
 
          
         ctrlfsm.act("WAIT_FOR_TX_READY",
+            NextValue(self.delay_counter,0),
             If(self.spi.dat_o[4] == 0,
-                NextState("WAIT_FOR_TX_READY") 
+                NextValue(self.test.p2,1),
+                NextState("READ_STATUS_REGISTER") 
             ).Else(
-                NextState("WRITE_TEST_DATA"),
-                NextValue(_index,_index + 1)
+                NextState("DELAY_CHAR")
             )      
         )
 
-        ctrlfsm.act("DELAY",
-                NextValue(self.test.p1,0),
+        ctrlfsm.act("DELAY_CHAR",
+                NextValue(self.test.p2,0),
                 If(self.delay_counter[self.delay_msb]==1,
+                    NextState("WRITE_TEST_DATA"),
+                     NextValue(_index,_index + 1),
+                     NextValue(self.test.p0,1)
+                ).Else(
+                    NextValue(self.delay_counter,self.delay_counter+1),
+                    NextState("DELAY_CHAR"),
+                    NextValue(self.test.p0,0)
+                )
+        )
+
+
+        ctrlfsm.act("DELAY_FRAME",    # 4 x inter char delay
+                NextValue(self.test.p0,0),
+                NextValue(pads_spi.ssn,1), 
+                If(self.delay_counter[self.delay_msb+2]==1,
                     NextValue(_index, len(spi_init)),   #start of data
                     NextState("WRITE_TEST_DATA")
                 ).Else(
                     NextValue(self.delay_counter,self.delay_counter+1),
-                    NextState("DELAY")
+                    NextState("DELAY_FRAME")
                 )
         )
 
@@ -208,7 +220,6 @@ class SPIDEMO(Module):
         yield from self.tb_spi_controller()
         print("-------------------------")
 
-         
     def tb_spi_controller(self):
         states = list(self.ctrlfsm.actions.keys())      #names of states
         yield self.spi.ack_o.eq(1)
@@ -220,22 +231,26 @@ class SPIDEMO(Module):
             state = yield self.ctrlfsm.state
             index = yield self.index
             addr  = yield self.spi.addr_i
+            p_mem_adr = yield self.p_mem.adr
             data  = yield self.spi.dat_i
             spi_strobe = yield self.spi.tb_i
             spi_rw     = yield self.spi.rw_i
             spi_ack_o  = yield self.spi.ack_o
             delay_counter = yield self.delay_counter
+            if (states[state] == "WRITE_CONF_DATA"):
+                print("State: {:<20}: Index={:<2}, MEM: p_mem.adr {:02x}, SPI: Addr {:03x}, Data {:02x} ".format(states[state],index,p_mem_adr,addr,data))
             if (spi_strobe == 1) & (spi_rw == 1):
-                print("State: {:<20}: Index={:<2}, SPI: Addr {:03x}, Data {:02x} ".format(states[state],index,addr,data),end="")
+                print("State: {:<20}: Index={:<2}, MEM: p_mem.adr {:02x}, SPI: Addr {:03x}, Data {:02x} ".format(states[state],index,p_mem_adr,addr,data),end="")
                 if addr == SPIDEMO.spi_regs["SPITXDR"]:
                     if (data != ord('\r')):
-                        print("[{:c}]".format(data),end="")
+                        if (data > 64):
+                            print("[{:c}]".format(data),end="")
                     else:
                         print("[<newline>]",end="")  
                 print()
-            if (states[state] == "DELAY") & (delay_counter == 0):
+            if (states[state] == "DELAY_FRAME") & (delay_counter == 0):
                 print("State: {:<20}:  Start Delay Cycle count = {:04d}".format(states[state],_cycles))
-            if (states[state] == "DELAY") & (delay_counter == (1<<self.delay_msb)-1):
+            if (states[state] == "DELAY_FRAME") & (delay_counter == (1<<self.delay_msb+2)-1):
                 print("State: {:<20}:  End Delay   Cycle count = {:04d}".format(states[state],_cycles))
                 _frame+=1
                 if (_frame==2):

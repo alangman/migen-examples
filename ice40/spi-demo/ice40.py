@@ -44,7 +44,7 @@ class SB_SPI(Module):
                  "lrc":{"BUS_ADDR74":0b0001},
                 "available":["lrc","llc"]
                 }
-    def __init__(self,pads = None, loc=None,sim=False):
+    def __init__(self,pads = None, loc=None,sim=False,core_ssn=False):
         #Check to see if resource can be allocatedtb_i.eq(1),
         if not SB_SPI.locations["available"]:
             raise ICE40ResourceError("SB_SPI: all resources allocated")
@@ -85,7 +85,7 @@ class SB_SPI(Module):
         self.sck_o     = Signal()          # Slave Clock output to PAD
         self.sckoe_o   = Signal()          # Slave Clock output enable to PAD (active high)
         self.scsn_i    = Signal(reset=0b1) # Slave Chip Select input from PAD (select by default)
-        self.mcsno_o   = Signal(4)         # Master Chip Select Output to PAD (4 bits)
+        self.mcsno_o   = Signal(4,reset_less=True)         # Master Chip Select Output to PAD (4 bits)
         self.mcsnoe_o  = Signal(4)         # Master Chip Select output enable to PAD. (active high)
 
 
@@ -100,10 +100,12 @@ class SB_SPI(Module):
                         io_PACKAGE_PIN = self.pads.miso, o_OUTPUT_ENABLE=self.soe_o, o_D_OUT_0=self.so_o, o_D_IN_0=self.mi_i)
             self.specials += Instance("SB_IO", p_PIN_TYPE=0b101001,p_PULLUP=0b1,
                         io_PACKAGE_PIN = self.pads.sck, o_OUTPUT_ENABLE=self.sckoe_o, o_D_OUT_0=self.sck_o, o_D_IN_0=self.sck_i)
-            #n_ssn = len(pads.ssn)
-            #for i in range(n_ssn):   #support more than on CS
-            #    self.specials += Instance("SB_IO", p_PIN_TYPE=0b101001,
-            #            io_PACKAGE_PIN = self.pads.ssn[(i+1) % n_ssn], o_OUTPUT_ENABLE=self.mcsno_o[i], o_D_IN_0=self.mcsnoe_o[i])
+            if core_ssn==True:
+                n_ssn = len(pads.ssn)
+                for i in range(n_ssn):   #support more than on CS
+                    self.comb += If(self.mcsnoe_o,
+                                    self.pads.ssn[i].eq(self.mcsno_o[i])
+                            )
 
         #Instantiate Lattice IP
             self.specials += Instance ("SB_SPI",
