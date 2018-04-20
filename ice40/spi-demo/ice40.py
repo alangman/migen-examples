@@ -41,8 +41,8 @@ class OSC(Module):
 
 class SB_SPI(Module):
     locations = {"llc":{"BUS_ADDR74":0b0000},
-                 "lrc":{"BUS_ADDR74":0b0001},
-                "available":["lrc","llc"]
+                 "lrc":{"BUS_ADDR74":0b0010},
+                "available":["llc","lrc"]
                 }
     def __init__(self,pads = None, loc=None,sim=False,core_ssn=False):
         #Check to see if resource can be allocatedtb_i.eq(1),
