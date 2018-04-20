@@ -18,7 +18,7 @@ class Blinker(Module):
 
 class SPIDEMO(Module):
     
-    def __init__(self,platform=None,sim=False,BUS_ADDR74 = 0b0010):
+    def __init__(self,platform=None,sim=False,BUS_ADDR74 = 0b0000):
 
         SPICR0  =0x08
         SPICR1  =0x09
@@ -63,19 +63,24 @@ class SPIDEMO(Module):
         spi_read_data  = Signal(8)             # System Data Output (8 bits)   
         spi_ack        = Signal()              # Transaction acknowledge from SPI Core
 
-        cnt           = Signal(10,reset=0)
+        cnt           = Signal(12,reset=0)
         data_counter  = Signal(8,reset=0)
         state         = Signal(4,reset=0)
+
+        #Get chip IO
+        pads_spi = platform.request("spi")
+
         
         if sim:
-            delay_bit = 1
+            delay_bit = 2
         else:
-            delay_bit = 9
+            delay_bit = 11
 
         wait_ack = lambda val: [If(spi_ack==val,
                                     state.eq(state)
                                 ).Else(
-                                    wstrb.eq(0),strobe.eq(0),state.eq(state+1)
+                                    wstrb.eq(0),strobe.eq(0),
+                                    state.eq(state+1)
                                 )]
         write = lambda reg,dat : [write_data.eq(dat),address.eq(reg),wstrb.eq(1),strobe.eq(1),state.eq(state+1)]
 
@@ -88,6 +93,7 @@ class SPIDEMO(Module):
                                                     )]
         delay = lambda bit,c_state,n_state : [If(cnt[bit] == 1,
                                                         state.eq(n_state),
+                                                        cnt.eq(0)
                                                 ).Else(
                                                         state.eq(c_state),
                                                         cnt.eq(cnt+1)
@@ -97,7 +103,7 @@ class SPIDEMO(Module):
                 Case(state, {
                     0b0000:         write(SPICR1,0x80),
                     0b0001:         wait_ack(0),
-                    0b0010:         write(SPIBR,0x3f),
+                    0b0010:         write(SPIBR ,0x3f),
                     0b0011:         wait_ack(0),
                     0b0100:         write(SPICR2,0xC0),
                     0b0101:         wait_ack(0),
@@ -111,8 +117,6 @@ class SPIDEMO(Module):
                 }) 
 
 
-
-
         if not sim:
             clk =Signal()
             self.specials += Instance(  "SB_HFOSC",
@@ -123,12 +127,10 @@ class SPIDEMO(Module):
                                     )
             self.submodules += CRG(clk)
 
-            pads_spi = platform.request("spi")
-            test = platform.request("test")
-            self.comb += test.p0.eq(clk)
+           
 
         #Configure simple led blinker
-            self.submodules.blinker = Blinker(platform.request("led"),12e6,period=0.5)
+            self.submodules.blinker = Blinker(platform.request("led"),12e6,period=1)
 
             self.specials += Instance("SB_IO", p_PIN_TYPE=0b101001,
                         io_PACKAGE_PIN = pads_spi.mosi, o_OUTPUT_ENABLE=moe, o_D_OUT_0=mo, o_D_IN_0=si)
@@ -137,9 +139,9 @@ class SPIDEMO(Module):
             self.specials += Instance("SB_IO", p_PIN_TYPE=0b101001,
                         io_PACKAGE_PIN = pads_spi.sck, o_OUTPUT_ENABLE=sckoe, o_D_OUT_0=scko, o_D_IN_0=scki)
 
-            #n_ssn = len(pads_spi.ssn)
-            #for i in range(n_ssn):   #support more than on CS
-            #        self.comb += If(mcsnoe[i],pads_spi.ssn[i].eq(mcsno[i]))
+            n_ssn = len(pads_spi.ssn)
+            for i in range(n_ssn):   #support more than on CS
+                    self.comb += If(mcsnoe[i],pads_spi.ssn[i].eq(mcsno[i]))
 
             self.specials += Instance ("SB_SPI",
                                     p_BUS_ADDR74  = "0b{:04b}".format(BUS_ADDR74),
@@ -231,14 +233,13 @@ class SPIDEMO(Module):
             spi_strobe      = yield self.strobe
             spi_rw          = yield self.wstrb
             spi_ack         = yield self.spi_ack
-            #if (states[state]=="STATE7"):
-            print("State: {:04d}: Data Counter={:<4}, SPI: Addr {:02x}, Data {:02x}, Cycles {:<5} Bus Address {}".format(state,data_counter,addr,data,_cycles,bus_address))      
-            #if states[state] == "STATE11" and data_counter == 10:
-            #        _run=False
+            if (state==0b0111):
+                print("State: {:04d}: Data Counter={:<4}, SPI: Addr {:02x}, Data {:02x}, Cycles {:<5} Bus Address {}".format(state,data_counter,addr,data,_cycles,bus_address))      
+            if state == 0b1100 and data_counter == 10:
+                _run=False
             _cycles += 1 
             yield
-            if (_cycles == 100):
-                _run=False
+
 
 
 
