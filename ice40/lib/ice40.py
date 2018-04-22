@@ -2,6 +2,10 @@ from migen import *
 
 class ICE40ResourceError(Exception):
     pass
+class DeviceInterfaceError(Exception):
+    pass
+class DeviceSimulationError(Exception):
+    pass
 
 class OSC(Module):
     Clk = { "48MHz":("0b00","SB_HFOSC",48000000),
@@ -44,7 +48,7 @@ class SB_SPI(Module):
                  "lrc":{"BUS_ADDR74":0b0010},
                 "available":["llc","lrc"]
                 }
-    def __init__(self,pads = None, loc=None,sim=False,core_ssn=False):
+    def __init__(self,pads = None,bus = None,loc=None,sim=False,core_ssn=False):
         #Check to see if resource can be allocatedtb_i.eq(1),
         if not SB_SPI.locations["available"]:
             raise ICE40ResourceError("SB_SPI: all resources allocated")
@@ -61,7 +65,7 @@ class SB_SPI(Module):
         if pads is None:
              ICE40ResourceError("SB_SPI: No pads defined.")
         self.pads = pads
-        print("Pads = {}".format(self.pads))
+
 
         #SOC Interface
         self.wkup_o    = Signal()       # SPI Wakeup from Standby signal
@@ -88,7 +92,14 @@ class SB_SPI(Module):
         self.mcsno_o   = Signal(4,reset_less=True)         # Master Chip Select Output to PAD (4 bits)
         self.mcsnoe_o  = Signal(4)         # Master Chip Select output enable to PAD. (active high)
 
-
+        #Add bus
+        if not bus is None:
+            if bus == "wishbone":
+                self.add_wishbone_bus()
+            else:
+                raise DeviceInterfaceError("{} bus is not supported".format(bus))
+                
+        
         #Internal Signals   (upper bits of SPI is dependant on the core)
         self._bus_addr74 = Signal(4,reset=SB_SPI.locations[self._loc]["BUS_ADDR74"])                       #fixed address
         
@@ -159,5 +170,60 @@ class SB_SPI(Module):
                                     o_MCSNOE1     = self.mcsnoe_o[1],
                                     o_MCSNOE0     = self.mcsnoe_o[0]
             )
+
+        def add_wishbone_bus(self,data_width=8):
+            self. bus = wishbone.Interface(data_width=data_width)
+            self.sync += [
+                            self.rw_i.eq(self.wishbone.we),
+                            self.tb_i.eq(self.wishbone.cyc & self.wishbone.stb),
+                            self.addr_i.eq(self.wishbone.adr[:4]),     #upper four bits fixed for chosen core
+                            self.dat_i.eq(self.wishbone.dat_w),
+                            self.wishbone.dat_r.eq(self.dat_o)
+                        ]
+            self.submodules.fsm = FSM(reset_state="IDLE")
+            self.fsm.act("IDLE",
+                NextValue(self.wishbone.ack,0), 
+                NextValue(self.tb_i,0),
+                If  (self.wishbone.cyc & self.wishbone.stb,
+                        NextValue(self.tb_i,1),
+                        NextState("WAIT_SPI_ACK")
+                    )
+                )
+            self.fsm.act("WAIT_SPI_ACK",              #Should add a check for a bus error!
+                If (self.ack_o == 1,
+                    NextValue(self.tb_i,0),   
+                    NextState("SEND_WB_ACK")
+                    )
+                )
+            self.fsm.act("SEND_WB_ACK",
+                NextValue(self.wishbone.ack,1),
+                NextState("IDLE")
+                )
+
+        def spi_sim_model(self,delay=2):
+            if (delay > 255):
+                raise DeviceSimulationError("Maximum SPI ack delay must be less than 256 clock cycles")
+            ack_delay = Signal(8,reset=delay)
+            self.submodules.spi_model = FSM(reset_state="IDLE")
+            self.fsm.act("IDLE",
+                NextValue(self.ack_o,0), 
+                    If  (self.tb_i == 1,
+                        NextState("DONE")
+                    )
+            )
+            self.fsm.act("DONE",
+                If (self.tb_i == 0,
+                    NextValue(ack_delay,delay),
+                    NextStat("WAIT")
+                    )
+            )
+            self.fsm.act("WAIT",
+                If (ack_delay == 0,
+                    NextValue(self.ack_o,1),
+                    NextState("IDLE")
+                ),
+                NextValue(ack_delay,ack_delay-1)
+            )
+
 
 

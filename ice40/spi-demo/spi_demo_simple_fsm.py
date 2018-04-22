@@ -48,6 +48,7 @@ class SPIDEMO(Module):
         #Define simple state machines to write init and test string to SB_SPI
         self.submodules.ctrlfsm  = ctrlfsm = FSM()
 
+
         self.data_counter = Signal(8,reset=0)
         self.delay_counter = Signal(32,reset=10)
 

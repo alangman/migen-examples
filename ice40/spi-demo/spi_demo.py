@@ -1,3 +1,7 @@
+import sys
+_libs = ["../lib"]
+sys.path += _libs
+
 from migen import *
 from migen.genlib.io import CRG
 from migen.genlib.misc import WaitTimer
@@ -46,8 +50,6 @@ class SPIDEMO(Module):
         mem_i_test_str =  [(SPIDEMO.spi_regs["SPITXDR"] << 8 | char) for char in spi_test_str]
         self.specials.mem = Memory(name="mem",width=mem_width,depth=mem_depth,init=mem_i_config + mem_i_test_str)
         self.specials.p_mem = self.mem.get_port(async_read=True)
-
-        print("Length of test vector = {:<2}, Depth of Memory = {:<2}".format(len(spi_test_str),self.mem.depth))
 
         #Configure oscillator and clock
         self.submodules.osc = OSC(freq="48MHz",sim=sim)
@@ -210,8 +212,6 @@ class SPIDEMO(Module):
         )
 
 
-      
-
     def tb_spi_demo(self):
         print("[TEST 1] Read init memory")
         yield from self.tb_command_memory()
@@ -285,8 +285,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     command = args.command[0]
     plat = Platform()
-
-
     if command == "sim":
         spidemo = SPIDEMO(platform=plat,sim=True)
         spidemo.run_simulation()
